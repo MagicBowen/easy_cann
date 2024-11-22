@@ -190,7 +190,7 @@ private:
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-struct AddOp {
+struct KernelAdd {
     template <typename T>
     void operator()(Tensor<T> x, Tensor<T> y, Tensor<T> z, std::size_t cnt) {
         std::cout << "Add: x.size = " << x.size << ", x.type = " << typeid(T).name()
@@ -200,7 +200,7 @@ struct AddOp {
     }
 };
 
-struct SubOp {
+struct KernelSub {
     template<typename T1, typename T2, typename T3, typename T4>
     void operator()(Tensor<T1> x, Tensor<T2> y, Tensor<T3> z, Tensor<T4> tmpTensor, std::size_t cnt, bool cond) {
         std::cout << "Sub: x.size = " << x.size << ", x.type = " << typeid(T1).name()
@@ -234,7 +234,7 @@ SCENARIO("Test kernel register") {
     unsigned char y[10];
     unsigned char z[10];
 
-    KERNEL_EXECUTE(AddOp) {
+    KERNEL_EXECUTE(KernelAdd) {
         KERNEL_TYPE(ELEM_WISE)
         KERNEL_INPUTS(int, int)
         KERNEL_OUTPUTS(int)
@@ -243,7 +243,7 @@ SCENARIO("Test kernel register") {
         KERNEL_PARAMS(10)
     }
 
-    KERNEL_EXECUTE(SubOp) {
+    KERNEL_EXECUTE(KernelSub) {
         KERNEL_TYPE(ELEM_WISE)
         KERNEL_INPUTS(int, char)
         KERNEL_OUTPUTS(float)
