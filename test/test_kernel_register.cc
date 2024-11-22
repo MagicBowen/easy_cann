@@ -213,14 +213,20 @@ struct SubOp {
 };
 
 // ///////////////////////////////////////////////////////////////////////////
-#define KERNEL_EXECUTE()    for(bool enter = true; enter; enter = false)
-#define KERNEL_TYPE(TYPE)   KernelExecutor<KernelType::TYPE,
-#define KERNEL_FUNC(FUNC)   FUNC,
-#define KERNEL_INPUTS(...)  InputTypes<__VA_ARGS__>,
-#define KERNEL_OUTPUTS(...) OutputTypes<__VA_ARGS__>,
-#define KERNEL_TEMPS(...)   TempTypes<__VA_ARGS__>>
-#define KERNEL_ADDRS(...)   { __VA_ARGS__ }
-#define KERNEL_PARAMS(...)  .Run(__VA_ARGS__);
+template <typename OP>
+struct OpWrapper {
+    using type = OP;
+    bool unused = true;
+};
+
+// ///////////////////////////////////////////////////////////////////////////
+#define KERNEL_EXECUTE(FUNC)    for(OpWrapper<FUNC> op_; op_.unused; op_.unused = false)
+#define KERNEL_TYPE(TYPE)       KernelExecutor<KernelType::TYPE, typename decltype(op_)::type,
+#define KERNEL_INPUTS(...)      InputTypes<__VA_ARGS__>,
+#define KERNEL_OUTPUTS(...)     OutputTypes<__VA_ARGS__>,
+#define KERNEL_TEMPS(...)       TempTypes<__VA_ARGS__>>
+#define KERNEL_ADDRS(...)       { __VA_ARGS__ }
+#define KERNEL_PARAMS(...)      .Run(__VA_ARGS__);
 
 /////////////////////////////////////////////////////////////////////////////
 SCENARIO("Test kernel register") {
@@ -228,9 +234,8 @@ SCENARIO("Test kernel register") {
     unsigned char y[10];
     unsigned char z[10];
 
-    KERNEL_EXECUTE() {
+    KERNEL_EXECUTE(AddOp) {
         KERNEL_TYPE(ELEM_WISE)
-        KERNEL_FUNC(AddOp)
         KERNEL_INPUTS(int, int)
         KERNEL_OUTPUTS(int)
         KERNEL_TEMPS()
@@ -238,9 +243,8 @@ SCENARIO("Test kernel register") {
         KERNEL_PARAMS(10)
     }
 
-    KERNEL_EXECUTE() {
+    KERNEL_EXECUTE(SubOp) {
         KERNEL_TYPE(ELEM_WISE)
-        KERNEL_FUNC(SubOp)
         KERNEL_INPUTS(int, char)
         KERNEL_OUTPUTS(float)
         KERNEL_TEMPS(float)
