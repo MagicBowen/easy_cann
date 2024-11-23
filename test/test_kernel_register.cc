@@ -43,13 +43,13 @@ struct ParamTypes{
 };
 
 template<typename ... Ts>
-using InputTypes = ParamTypes<ParamType::INPUT, Ts...>;
+using Input = ParamTypes<ParamType::INPUT, Ts...>;
 
 template<typename ... Ts>
-using OutputTypes = ParamTypes<ParamType::OUTPUT, Ts...>;
+using Output = ParamTypes<ParamType::OUTPUT, Ts...>;
 
 template<typename ... Ts>
-using TempTypes = ParamTypes<ParamType::TEMP, Ts...>;
+using Temp = ParamTypes<ParamType::TEMP, Ts...>;
 
 ///////////////////////////////////////////////////////////////////////////////
 enum class KernelType {
@@ -57,39 +57,52 @@ enum class KernelType {
     REDUCE,
 };
 
-template <KernelType KT, typename OP, typename ...>
-struct KernelExecutor;
+// template <KernelType KT, typename OP, typename ...>
+// struct KernelExecutor;
 
-template <typename OP, typename IN_TYPES, typename OUT_TYPES, typename TMP_TYPES>
-class KernelExecutor<KernelType::ELEM_WISE, OP, IN_TYPES, OUT_TYPES, TMP_TYPES> {
+template <typename OP, typename INPUT_TYPES, typename OUTPUT_TYPES, typename TEMP_TYPES = Temp<>>
+class ElemWise {
 
-    static_assert(IN_TYPES::usage == ParamType::INPUT, "IN_TYPES should be INPUT");
-    static_assert(OUT_TYPES::usage == ParamType::OUTPUT, "OUT_TYPES should be OUTPUT");
-    static_assert(TMP_TYPES::usage == ParamType::TEMP, "TMP_TYPES should be TEMP");
+    static_assert(INPUT_TYPES::usage  == ParamType::INPUT, "INPUT_TYPES should be INPUT");
+    static_assert(OUTPUT_TYPES::usage == ParamType::OUTPUT, "OUTPUT_TYPES should be OUTPUT");
+    static_assert(TEMP_TYPES::usage   == ParamType::TEMP, "TEMP_TYPES should be TEMP");
 
-    using INPUTS = typename IN_TYPES::types;
-    using OUTPUTS = typename OUT_TYPES::types;
-    using TEMPS = typename TMP_TYPES::types;
+    using INPUTS  = typename INPUT_TYPES::types;
+    using OUTPUTS = typename OUTPUT_TYPES::types;
+    using TEMPS   = typename TEMP_TYPES::types;
 
-    static constexpr std::size_t INPUT_COUNT = TypeList_Size<INPUTS>::value;
+    static constexpr std::size_t INPUT_COUNT  = TypeList_Size<INPUTS>::value;
     static constexpr std::size_t OUTPUT_COUNT = TypeList_Size<OUTPUTS>::value;
-    static constexpr std::size_t TEMP_COUNT = TypeList_Size<TEMPS>::value;
+    static constexpr std::size_t TEMP_COUNT   = TypeList_Size<TEMPS>::value;
+    static constexpr std::size_t ADDR_COUNT   = INPUT_COUNT + OUTPUT_COUNT;
 
 public:
+    // template <typename... Args>
+    // KernelExecutor(Args&&... args) {
+
+    //     static_assert(sizeof...(Args) == INPUT_COUNT + OUTPUT_COUNT, "args size is wrong!");
+
+    //     FillAddrs(asl::forward<Args>(args)...);
+
+    //     FillOffsets<INPUTS>(inOffsets_);
+    //     FillOffsets<OUTPUTS>(outOffsets_);
+    //     FillOffsets<TEMPS>(tempOffsets_);
+    // }
+
     template <typename... Args>
-    KernelExecutor(Args&&... args) {
+    void Run(Args&&... args) {
+        
+        static_assert(sizeof...(Args) > ADDR_COUNT, "args size is wrong!");
 
-        static_assert(sizeof...(Args) == INPUT_COUNT + OUTPUT_COUNT, "args size is wrong!");
+        auto argsTuple = ForwardAsTuple(std::forward<Args>(args)...);
 
-        FillAddrs(asl::forward<Args>(args)...);
+        unsigned int count = TupleElemGet<ADDR_COUNT>(argsTuple);
+
+        FillAddrs(argsTuple, MakeIndexSequence<ADDR_COUNT>{});
 
         FillOffsets<INPUTS>(inOffsets_);
         FillOffsets<OUTPUTS>(outOffsets_);
         FillOffsets<TEMPS>(tempOffsets_);
-    }
-
-    template <typename... Args>
-    void Run(std::size_t count, Args&&... args) {
 
         typename TensorTuple<INPUTS>::type inTensors;
         typename TensorTuple<OUTPUTS>::type outTensors;
@@ -99,11 +112,12 @@ public:
         InitOutputTensors(outTensors, count, MakeIndexSequence<OUTPUT_COUNT>{});
         InitTempTensors(tempTensors, count, MakeIndexSequence<TEMP_COUNT>{});
 
-        Compute(inTensors, outTensors, tempTensors, 
+        Compute(inTensors, outTensors, tempTensors, argsTuple,
                 MakeIndexSequence<INPUT_COUNT>{}, 
                 MakeIndexSequence<OUTPUT_COUNT>{}, 
                 MakeIndexSequence<TEMP_COUNT>{}, 
-                count, asl::forward<Args>(args)...);
+                MakeIndexSequence<sizeof...(Args) - ADDR_COUNT - 1>{},
+                count);
     }
 
 private:
@@ -146,18 +160,22 @@ private:
         return tensor;
     }
 
-    template<typename IN_TUPLE, typename OUT_TUPLE, typename TMP_TUPLE,  
-            std::size_t... I1, std::size_t... I2,  std::size_t... I3, typename ...Args>
-    void Compute(IN_TUPLE& inTensors, OUT_TUPLE& outTensors, TMP_TUPLE& tempTensors, 
-                 IndexSequence<I1...>, IndexSequence<I2...>, IndexSequence<I3...>, std::size_t cnt, Args&&... args) {
-        op_(TupleElemGet<I1>(inTensors)..., TupleElemGet<I2>(outTensors)..., TupleElemGet<I3>(tempTensors)..., cnt, asl::forward<Args>(args)...);
+    template<typename IN_TUPLE, typename OUT_TUPLE, typename TMP_TUPLE, typename ArgsType, 
+            std::size_t... I1, std::size_t... I2,  std::size_t... I3, std::size_t... I4>
+    void Compute(IN_TUPLE& inTensors, OUT_TUPLE& outTensors, TMP_TUPLE& tempTensors, ArgsType&& args,
+                 IndexSequence<I1...>, IndexSequence<I2...>, IndexSequence<I3...>, IndexSequence<I4...>, 
+                 std::size_t cnt) {
+        op_(TupleElemGet<I1>(inTensors)..., 
+            TupleElemGet<I2>(outTensors)..., 
+            TupleElemGet<I3>(tempTensors)..., 
+            cnt, 
+            TupleElemGet<ADDR_COUNT + 1 + I4>(std::forward<ArgsType>(args))...);
     }
 
 private:
-    // 填充 addr 到数组
-    template <typename ...Args>
-    void FillAddrs(Args&&... args) {
-        Addr argsArr[INPUT_COUNT + OUTPUT_COUNT] = { args... };
+    template <typename TupleType, std::size_t... Is>
+    void FillAddrs(TupleType& tuple, IndexSequence<Is...>) {
+        Addr argsArr[ADDR_COUNT] = { TupleElemGet<Is>(tuple)... };
         for (std::size_t i = 0; i < INPUT_COUNT; ++i) {
             inAddrs_[i] = argsArr[i];
         }
@@ -204,7 +222,7 @@ struct KernelSub {
     template<typename T1, typename T2, typename T3, typename T4>
     void operator()(Tensor<T1> x, Tensor<T2> y, Tensor<T3> z, Tensor<T4> tmpTensor, std::size_t cnt, bool cond) {
         std::cout << "Sub: x.size = " << x.size << ", x.type = " << typeid(T1).name()
-                  << ", y.size = " << y.size << "y, .type = " << typeid(T2).name()
+                  << ", y.size = " << y.size << ", y.type = " << typeid(T2).name()
                   << ", z.size = " << z.size << ", z.type = " << typeid(T3).name()
                   << ", tmpTensor.size = " << tmpTensor.size << ", tmpTensor.type = " << typeid(T4).name()
                   << ", cnt = " << cnt 
@@ -212,43 +230,31 @@ struct KernelSub {
     }
 };
 
-// ///////////////////////////////////////////////////////////////////////////
-template <typename OP>
-struct OpWrapper {
-    using type = OP;
-    bool unused = true;
+struct KernelTriple {
+    template<typename T1, typename T2, typename T3, typename T4, typename T5>
+    void operator()(Tensor<T1> x, Tensor<T2> y, Tensor<T3> z, Tensor<T4> d, Tensor<T5> tmpTensor, std::size_t cnt, const std::string& log) {
+        std::cout << "Sub: x.size = " << x.size << ", x.type = " << typeid(T1).name()
+                  << ", y.size = " << y.size << ", y.type = " << typeid(T2).name()
+                  << ", z.size = " << z.size << ", z.type = " << typeid(T3).name()
+                  << ", d.size = " << d.size << ", d.type = " << typeid(T4).name()
+                  << ", tmpTensor.size = " << tmpTensor.size << ", tmpTensor.type = " << typeid(T5).name()
+                  << ", cnt = " << cnt 
+                  << ", log = " << log << std::endl;
+    }
 };
 
-// ///////////////////////////////////////////////////////////////////////////
-#define KERNEL_EXECUTE(FUNC)    for(OpWrapper<FUNC> op_; op_.unused; op_.unused = false)
-#define KERNEL_TYPE(TYPE)       KernelExecutor<KernelType::TYPE, typename decltype(op_)::type,
-#define KERNEL_INPUTS(...)      InputTypes<__VA_ARGS__>,
-#define KERNEL_OUTPUTS(...)     OutputTypes<__VA_ARGS__>,
-#define KERNEL_TEMPS(...)       TempTypes<__VA_ARGS__>>
-#define KERNEL_ADDRS(...)       { __VA_ARGS__ }
-#define KERNEL_PARAMS(...)      .Run(__VA_ARGS__);
-
-/////////////////////////////////////////////////////////////////////////////
-SCENARIO("Test kernel register") {
+SCENARIO("Test kernel register by template") {
     unsigned char x[10];
     unsigned char y[10];
     unsigned char z[10];
+    unsigned char d[10];
 
-    KERNEL_EXECUTE(KernelAdd) {
-        KERNEL_TYPE(ELEM_WISE)
-        KERNEL_INPUTS(int, int)
-        KERNEL_OUTPUTS(int)
-        KERNEL_TEMPS()
-        KERNEL_ADDRS(x, y, z)
-        KERNEL_PARAMS(10)
-    }
+    ElemWise<KernelAdd, Input<int, int>, Output<int>> AddKernel;
+    AddKernel.Run(x, y, z, 10);
 
-    KERNEL_EXECUTE(KernelSub) {
-        KERNEL_TYPE(ELEM_WISE)
-        KERNEL_INPUTS(int, char)
-        KERNEL_OUTPUTS(float)
-        KERNEL_TEMPS(float)
-        KERNEL_ADDRS(x, y, z)
-        KERNEL_PARAMS(10, true)
-    }
+    ElemWise<KernelSub, Input<int, char>, Output<float>, Temp<float>> SubKernel;
+    SubKernel.Run(x, y, z, 10, true);
+
+    ElemWise<KernelTriple, Input<char, int, long long>, Output<float>, Temp<unsigned short>> TripleKernel;
+    TripleKernel.Run(x, y, z, d, 10, "hello");
 }

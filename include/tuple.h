@@ -6,6 +6,7 @@
 #define TUPLE_H
 
 #include "type_list.h"
+#include "forward.h"
 
 namespace asl {
 
@@ -19,10 +20,17 @@ struct Tuple<T, Ts...> {
     Tuple<Ts...> tail;
     
     Tuple() : head(), tail() {}
+    Tuple(T&& h, Ts&&... ts) : head(asl::forward<T>(h)), tail(asl::forward<Ts>(ts)...) {}
 };
 
 template <>
 struct Tuple<> {};
+
+/////////////////////////////////////////////////////////////////////////////////////
+template <typename... Ts>
+Tuple<Ts&&...> ForwardAsTuple(Ts&&... ts) {
+    return Tuple<Ts&&...>(std::forward<Ts>(ts)...);
+}
 
 /////////////////////////////////////////////////////////////////////////////////////
 template <typename List>
@@ -54,6 +62,7 @@ struct TupleElemType<0, Tuple<T, Ts...>> {
 
 template <std::size_t N, typename T, typename... Ts>
 struct TupleElemType<N, Tuple<T, Ts...>> {
+    static_assert(N -1 < sizeof...(Ts), "N overflow!");
     using type = typename TupleElemType<N - 1, Tuple<Ts...>>::type;
 };
 
